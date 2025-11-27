@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SIMPLY</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: Arial; margin: 0; padding: 20px; background: #f0f9ff; }
+        .container { max-width: 400px; margin: 0 auto; }
+        .card { background: white; padding: 20px; margin: 10px 0; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .btn { background: #10b981; color: white; border: none; padding: 12px 20px; border-radius: 10px; cursor: pointer; width: 100%; margin: 5px 0; }
+        .job { border-left: 4px solid #10b981; padding: 15px; margin: 10px 0; background: #f8fafc; }
+        .balance { font-size: 1.5em; font-weight: bold; color: #10b981; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h2>🔄 SIMPLY</h2>
+            <div id="userInfo">Loading user data...</div>
+        </div>
+
+        <div class="card">
+            <h3>💼 Available Jobs</h3>
+            <div id="jobsList">Loading jobs...</div>
+        </div>
+
+        <div class="card">
+            <h3>🤖 AI Support</h3>
+            <input type="text" id="aiInput" placeholder="Ask about jobs, balance, packages..." style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px;">
+            <button onclick="askAI()" class="btn">Ask AI</button>
+            <div id="aiResponse" style="margin-top: 10px; padding: 10px; background: #f1f5f9; border-radius: 8px;"></div>
+        </div>
+
+        <div class="card">
+            <h3>💰 Withdraw Earnings</h3>
+            <button onclick="withdraw()" class="btn">Request Withdrawal (Min: 100/-)</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin + '/api';
+        let currentUser = null;
+
+        // Initialize Telegram WebApp
+        async function init() {
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.BackButton.hide();
+
+            try {
+                // Send Telegram initData to backend for auth
+                const response = await fetch(API_URL + '/auth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        initData: tg.initData 
+                    })
+                });
+
+                if (!response.ok) throw new Error('Auth failed');
+                
+                currentUser = await response.json();
+                updateUserDisplay();
+                loadJobs();
+
+            } catch (error) {
+                document.getElementById('userInfo').innerHTML = 'Auth failed. Open in Telegram.';
+            }
+        }
+
+        function updateUserDisplay() {
+            document.getElementById('userInfo').innerHTML = `
+                <p><strong>User:</strong> @${currentUser.username}</p>
+                <p class="balance">Balance: ${currentUser.balance}/-</p>
+                <p><strong>Package:</strong> ${currentUser.package}</p>
+                <p><strong>Jobs Today:</strong> ${currentUser.jobsToday}</p>
+            `;
+        }
+
+        async function loadJobs() {
+            try {
+                const response = await fetch(API_URL + '/jobs');
+                const jobs = await response.json();
+                
+                const jobsList = document.getElementById('jobsList');
+                jobsList.innerHTML = jobs.map(job => `
+                    <div class="job">
+                        <h4>${job.title} - ${job.price}/-</h4>
+                        <p>${job.description}</p>
+                        <p><small>Type: ${job.type} | Time: ${job.duration}</small></p>
+                        <button onclick="completeJob('${job.id}')" class="btn">Complete Job</button>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                document.getElementById('jobsList').innerHTML = 'Failed to load jobs';
+            }
+        }
+
+        async function completeJob(jobId) {
+            try {
+                const response = await fetch(API_URL + '/job/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        userId: currentUser.id, 
+                        jobId: jobId 
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert(`✅ Job completed! You earned ${result.earnings}/-\nNew balance: ${result.newBalance}/-`);
+                    init(); // Reload data
+                } else {
+                    alert(`❌ ${result.error}`);
+                }
+
+            } catch (error) {
+                alert('Network error. Try again.');
+            }
+        }
+
+        async function withdraw() {
+            try {
+                const response = await fetch(API_URL + '/withdraw', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.id })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert(`✅ Withdrawal request submitted!\nAmount: ${result.amount}/-\nAdmin will process manually.`);
+                    init();
+                } else {
+                    alert(`❌ ${result.error}`);
+                }
+
+            } catch (error) {
+                alert('Network error. Try again.');
+            }
+        }
+
+        async function askAI() {
+            const input = document.getElementById('aiInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+
+            try {
+                const response = await fetch(API_URL + '/ai/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        userId: currentUser.id, 
+                        message: message 
+                    })
+                });
+                
+                const result = await response.json();
+                document.getElementById('aiResponse').innerHTML = `<strong>AI:</strong> ${result.response}`;
+                input.value = '';
+
+            } catch (error) {
+                document.getElementById('aiResponse').innerHTML = 'AI service unavailable';
+            }
+        }
+
+        // Enter key for AI chat
+        document.getElementById('aiInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') askAI();
+        });
+
+        // Initialize app
+        init();
+    </script>
+</body>
+</html>
+

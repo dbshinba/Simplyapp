@@ -34,6 +34,20 @@ const ai = new AIAgent();
 app.use(express.json());
 app.use(express.static('public'));
 
+// Webhook setup - NO POLLING
+if (process.env.RENDER) {
+    const WEBHOOK_URL = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/bot${BOT_TOKEN}`;
+    bot.setWebHook(WEBHOOK_URL);
+} else {
+    // Local development - use very specific webhook or no bot
+    console.log('🤖 Bot disabled for local development to avoid conflicts');
+}
+
+app.post(`/bot${BOT_TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
+
 app.post('/api/auth', (req, res) => {
     const { initData } = req.body;
     const urlParams = new URLSearchParams(initData);
@@ -52,7 +66,10 @@ app.post('/api/auth', (req, res) => {
             package: 'free',
             jobsToday: 0
         });
-        bot.sendMessage(CHANNEL_ID, `🆕 New user: @${user.username}`);
+        // Only send message if bot is active
+        if (process.env.RENDER) {
+            bot.sendMessage(CHANNEL_ID, `🆕 New user: @${user.username}`);
+        }
     }
     res.json(users.get(user.id));
 });
@@ -75,7 +92,9 @@ app.post('/api/job/complete', (req, res) => {
     user.jobsToday += 1;
     job.status = 'completed';
     
-    bot.sendMessage(CHANNEL_ID, `✅ ${user.username} earned ${job.price}/-`);
+    if (process.env.RENDER) {
+        bot.sendMessage(CHANNEL_ID, `✅ ${user.username} earned ${job.price}/-`);
+    }
     res.json({ success: true, earnings: job.price, balance: user.balance });
 });
 
@@ -86,7 +105,9 @@ app.post('/api/withdraw', (req, res) => {
     
     const amount = user.balance;
     user.balance = 0;
-    bot.sendMessage(CHANNEL_ID, `🔄 Withdrawal: ${user.username} - ${amount}/-`);
+    if (process.env.RENDER) {
+        bot.sendMessage(CHANNEL_ID, `🔄 Withdrawal: ${user.username} - ${amount}/-`);
+    }
     res.json({ success: true, amount });
 });
 
@@ -96,21 +117,24 @@ app.post('/api/ai/chat', async (req, res) => {
     res.json({ response });
 });
 
-bot.onText(/\/addjob (.+)/, (msg, match) => {
-    const jobData = JSON.parse(match[1]);
-    const jobId = Date.now().toString();
-    jobs.set(jobId, { id: jobId, ...jobData, status: 'active' });
-    bot.sendMessage(msg.from.id, `✅ Job added: ${jobData.title}`);
-});
+// Admin commands only work in production
+if (process.env.RENDER) {
+    bot.onText(/\/addjob (.+)/, (msg, match) => {
+        const jobData = JSON.parse(match[1]);
+        const jobId = Date.now().toString();
+        jobs.set(jobId, { id: jobId, ...jobData, status: 'active' });
+        bot.sendMessage(msg.from.id, `✅ Job added: ${jobData.title}`);
+    });
 
-bot.onText(/\/payment (.+)/, (msg, match) => {
-    const [userId, amount] = match[1].split(' ');
-    const user = users.get(userId);
-    if (user) {
-        user.balance += parseInt(amount);
-        bot.sendMessage(userId, `💰 ${amount}/- added!`);
-    }
-});
+    bot.onText(/\/payment (.+)/, (msg, match) => {
+        const [userId, amount] = match[1].split(' ');
+        const user = users.get(userId);
+        if (user) {
+            user.balance += parseInt(amount);
+            bot.sendMessage(userId, `💰 ${amount}/- added!`);
+        }
+    });
+}
 
 jobs.set('1', { id: '1', title: 'YouTube Video Watch', description: 'Watch 5min video', price: 5, type: 'video', status: 'active' });
 jobs.set('2', { id: '2', title: 'Facebook Like & Share', description: 'Like and share post', price: 3, type: 'social', status: 'active' });
@@ -118,5 +142,4 @@ jobs.set('2', { id: '2', title: 'Facebook Like & Share', description: 'Like and 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    bot.startPolling();
 });
